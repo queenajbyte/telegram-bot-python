@@ -1,44 +1,65 @@
 import os
-import time
-import telebot
-from dotenv import load_dotenv
-from commands import register_commands
+import logging
+from telegram import Update
+from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from groq import Groq
 
-# Load environment variables
-load_dotenv()
+# Konfigurasi Logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# Replace 'TELEGRAM_BOT_TOKEN' with the token you received from BotFather
-TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-try:
-    bot = telebot.TeleBot(TOKEN)
-    register_commands(bot)
+# Ambil token dari environment
+TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+BOT_NAME = os.getenv("BOT_NAME", "Queenajbot")
 
-    @bot.message_handler(commands=['start', 'hello'])
-    def send_welcome(message):
-        """
-        Handle '/start' and '/hello' commands.
+# Inisialisasi Groq
+client = Groq(api_key=GROQ_API_KEY)
 
-        Args:
-            message (telebot.types.Message): The message object.
-        """
-        bot.reply_to(message, "Hello! I'm a simple Telegram bot.")
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        f"👑 Halo! Saya adalah **{BOT_NAME}** — AI Trading Assistant Solana.\n\n"
+        "Kamu bisa tanya apa saja tentang meme coin, trading, atau minta saya scan token.\n"
+        "Coba ketik: `scan $WIF` atau `analisis SOL`"
+    )
 
-    @bot.message_handler(func=lambda msg: True)
-    def echo_all(message):
-        """
-        Echo all incoming text messages back to the user.
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    chat_id = update.message.chat_id
 
-        Args:
-            message (telebot.types.Message): The message object.
-        """
-        bot.reply_to(message, message.text)
+    # Prompt system untuk Queenajbot
+    system_prompt = f"""
+    Kamu adalah {BOT_NAME}, AI Trading Agent yang cerdas, fun, dan hati-hati di Solana.
+    Spesialis meme coin, sniping, dan analisis token.
+    Jawab dalam bahasa Indonesia yang santai tapi profesional.
+    Selalu ingatkan risiko trading.
+    """
 
-    # Remove webhook to avoid conflicts with polling
-    bot.delete_webhook(drop_pending_updates=True)
-    bot.polling()
+    try:
+        response = client.chat.completions.create(
+            model=os.getenv("LLM_MODEL", "llama3-70b-8192"),
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_message}
+            ],
+            temperature=0.7,
+            max_tokens=800
+        )
+        ai_reply = response.choices[0].message.content
+        await update.message.reply_text(ai_reply)
+        
+    except Exception as e:
+        logger.error(f"Error: {e}")
+        await update.message.reply_text("Maaf, saya sedang mengalami gangguan. Coba lagi nanti ya.")
 
-except Exception as e:
-    print(f"CRITICAL ERROR: Failed to initialize bot with provided token. Error: {e}")
-    print("The application will hang to prevent a restart loop. Please fix the TELEGRAM_BOT_TOKEN environment variable.")
-    while True:
-        time.sleep(3600)
+def main():
+    app = Application.builder().token(TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    print(f"✅ {BOT_NAME} sedang aktif...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
